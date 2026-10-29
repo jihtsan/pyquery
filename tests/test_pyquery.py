@@ -271,6 +271,63 @@ class TestTraversal(TestCase):
     def test_not(self):
         assert len(self.klass('div', self.html).not_('.node3')) == 1
 
+    def test_filtering_with_ancestor_and_sibling_context(self):
+        d = pq('<main><ul id="first" data-note="a &gt; b"><li>C</li></ul>'
+               '<div><ul id="inside"><li>E</li></ul></div>'
+               '<ul id="last"><li>F</li></ul></main>')
+        selected = d('ul')
+        for selector, expected in (
+            ('div > ul', ['inside']),
+            ('div ul', ['inside']),
+            ('main > div > ul', ['inside']),
+            ('div + ul', ['last']),
+            ('div ~ ul', ['last']),
+            ('div > ul, #first', ['first', 'inside']),
+            ('ul > li', []),
+            ('[data-note="a > b"]', ['first']),
+        ):
+            with self.subTest(selector=selector, method='filter'):
+                self.assertEqual([el.get('id') for el in selected.filter(selector)], expected)
+            with self.subTest(selector=selector, method='not_'):
+                self.assertEqual([el.get('id') for el in selected.not_(selector)],
+                                 [name for name in ('first', 'inside', 'last')
+                                  if name not in expected])
+            with self.subTest(selector=selector, method='is_'):
+                self.assertEqual(selected.is_(selector), bool(expected))
+        self.assertFalse(selected.eq(0).is_('div > ul'))
+        self.assertTrue(selected.eq(1).is_('div > ul'))
+        reversed_selection = pq(list(reversed(selected)))
+        self.assertEqual([el.get('id') for el in reversed_selection.filter('main ul')],
+                         ['last', 'inside', 'first'])
+
+    def test_context_filtering_traversal_and_multiple_trees(self):
+        d = pq('<main><ul id="first"/><div id="parent"><ul id="inside"/>'
+               '</div><ul id="last"/></main>')
+        for result, expected in (
+            (d('div').children('div > ul'), ['inside']),
+            (d('#inside').parent('main > div'), ['parent']),
+            (d('div').next('main > ul'), ['last']),
+            (d('div').prev('main > ul'), ['first']),
+            (d('#first').next_all('main > ul'), ['last']),
+            (d('#last').prev_all('main > ul'), ['first']),
+            (d('div').siblings('main > ul'), ['first', 'last']),
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual([el.get('id') for el in result], expected)
+        other = pq('<div><ul id="other"/></div>')
+        combined = pq([d('#inside')[0], other('ul')[0], d('#first')[0]])
+        self.assertEqual([el.get('id') for el in combined.filter('div > ul')],
+                         ['inside', 'other'])
+
+    def test_context_filtering_with_xml_namespaces(self):
+        d = pq('<r xmlns:x="urn:test"><x:group><x:item id="inside"/>'
+               '</x:group><x:item id="outside"/></r>',
+               parser='xml', namespaces={'x': 'urn:test'})
+        selected = d('x|item')
+        self.assertEqual(selected.filter('x|group > x|item').attr('id'), 'inside')
+        self.assertEqual(selected.not_('x|group > x|item').attr('id'), 'outside')
+        self.assertTrue(selected.eq(0).is_('x|group > x|item'))
+
     def test_is(self):
         assert self.klass('div', self.html).is_('.node3')
         assert not self.klass('div', self.html).is_('.foobazbar')

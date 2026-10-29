@@ -11,6 +11,7 @@ from reprlib import recursive_repr
 from urllib.parse import urlencode, urljoin
 
 import lxml.html
+from cssselect.parser import CombinedSelector, parse
 from lxml import etree
 
 from .cssselectpatch import JQueryTranslator
@@ -425,10 +426,30 @@ class PyQuery(list):
         if selector is None:
             results = elements
         else:
-            xpath = self._css_to_xpath(selector, 'self::')
-            results = []
-            for tag in elements:
-                results.extend(tag.xpath(xpath, namespaces=self.namespaces))
+            parsed_selectors = parse(selector)
+            if any(isinstance(part.parsed_tree, CombinedSelector)
+                   for part in parsed_selectors):
+                matchers = []
+                for part in parsed_selectors:
+                    use_root = isinstance(part.parsed_tree, CombinedSelector)
+                    prefix = 'descendant-or-self::' if use_root else 'self::'
+                    xpath = self._css_to_xpath(part.canonical(), prefix)
+                    matchers.append((use_root, xpath, {}))
+                results = []
+                for tag in elements:
+                    for use_root, xpath, matches in matchers:
+                        context = tag.getroottree().getroot() if use_root else tag
+                        if context not in matches:
+                            matches[context] = set(context.xpath(
+                                xpath, namespaces=self.namespaces))
+                        if tag in matches[context]:
+                            results.append(tag)
+                            break
+            else:
+                xpath = self._css_to_xpath(selector, 'self::')
+                results = []
+                for tag in elements:
+                    results.extend(tag.xpath(xpath, namespaces=self.namespaces))
         if reverse:
             results.reverse()
         if unique:
@@ -640,7 +661,12 @@ class PyQuery(list):
             >>> d('p').not_('.hello')
             [<p>]
         """
-        exclude = set(self._copy(selector, self))
+        if (isinstance(selector, str) and selector and
+                any(isinstance(part.parsed_tree, CombinedSelector)
+                    for part in parse(selector))):
+            exclude = set(self._filter_only(selector, self))
+        else:
+            exclude = set(self._copy(selector, self))
         return self._copy([e for e in self if e not in exclude],
                           parent=self)
 
