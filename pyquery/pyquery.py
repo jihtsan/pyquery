@@ -66,6 +66,20 @@ def build_camel_case_aliases(PyQuery):
         setattr(PyQuery, name, f.__get__(None, PyQuery))
 
 
+def _get_current_root(tag, roots):
+    """Find the current top ancestor, including after lxml detaches a subtree."""
+    ancestors = []
+    while tag not in roots:
+        ancestors.append(tag)
+        parent = tag.getparent()
+        if parent is None:
+            break
+        tag = parent
+    root = roots.get(tag, tag)
+    roots.update((ancestor, root) for ancestor in ancestors)
+    return root
+
+
 def fromstring(context, parser=None, custom_parser=None):
     """use html parser if we don't have clean xml
     """
@@ -426,7 +440,7 @@ class PyQuery(list):
         if selector is None:
             results = elements
         else:
-            parsed_selectors = parse(selector)
+            parsed_selectors = parse(selector.replace('[@', '['))
             if any(isinstance(part.parsed_tree, CombinedSelector)
                    for part in parsed_selectors):
                 matchers = []
@@ -436,9 +450,10 @@ class PyQuery(list):
                     xpath = self._css_to_xpath(part.canonical(), prefix)
                     matchers.append((use_root, xpath, {}))
                 results = []
+                roots = {}
                 for tag in elements:
                     for use_root, xpath, matches in matchers:
-                        context = tag.getroottree().getroot() if use_root else tag
+                        context = _get_current_root(tag, roots) if use_root else tag
                         if context not in matches:
                             matches[context] = set(context.xpath(
                                 xpath, namespaces=self.namespaces))
@@ -663,7 +678,7 @@ class PyQuery(list):
         """
         if (isinstance(selector, str) and selector and
                 any(isinstance(part.parsed_tree, CombinedSelector)
-                    for part in parse(selector))):
+                    for part in parse(selector.replace('[@', '[')))):
             exclude = set(self._filter_only(selector, self))
         else:
             exclude = set(self._copy(selector, self))

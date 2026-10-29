@@ -328,6 +328,33 @@ class TestTraversal(TestCase):
         self.assertEqual(selected.not_('x|group > x|item').attr('id'), 'outside')
         self.assertTrue(selected.eq(0).is_('x|group > x|item'))
 
+    def test_context_filtering_legacy_attributes(self):
+        d = pq('<main><ul id="outside"/><div id="parent">'
+               '<ul id="inside"/></div></main>')
+        for selector in ('[@id="inside"]', 'div > ul[@id="inside"]',
+                         'div[@id="parent"] > ul'):
+            with self.subTest(selector=selector, method='filter'):
+                self.assertEqual(d('ul').filter(selector).attr('id'), 'inside')
+            with self.subTest(selector=selector, method='not_'):
+                self.assertEqual(d('ul').not_(selector).attr('id'), 'outside')
+            with self.subTest(selector=selector, method='is_'):
+                self.assertTrue(d('ul').eq(1).is_(selector))
+
+    def test_context_filtering_detached_subtree(self):
+        d = pq('<main><section><div id="detached"><ul id="nested"/></div>'
+               '</section><div><ul id="attached"/></div></main>')
+        detached = d('#detached').remove()
+        items = detached('ul')
+        with self.subTest(method='filter'):
+            self.assertEqual(items.filter('div > ul').attr('id'), 'nested')
+        with self.subTest(method='not_'):
+            self.assertEqual(len(items.not_('div > ul')), 0)
+        with self.subTest(method='is_'):
+            self.assertTrue(items.is_('div > ul'))
+        combined = pq([items[0], d('#attached')[0]])
+        self.assertEqual([el.get('id') for el in combined.filter('div > ul')],
+                         ['nested', 'attached'])
+
     def test_is(self):
         assert self.klass('div', self.html).is_('.node3')
         assert not self.klass('div', self.html).is_('.foobazbar')
